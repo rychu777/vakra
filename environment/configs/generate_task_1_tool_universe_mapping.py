@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-Generate environment/configs/mcp_tool_universe_id_mapping.yaml from task_1 output files.
+Add the task_1 tool universes of every local split (data/*/capability_1_bi_apis/output)
+to environment/configs/mcp_tool_universe_id_mapping.yaml.
+
+Existing entries are kept, so universes of splits that are not downloaded locally stay mapped.
 
 Usage:
-    python scripts/generate_mcp_mapping.py [--dry-run]
+    python environment/configs/generate_task_1_tool_universe_mapping.py [--dry-run]
 """
 import json
 import sys
@@ -13,7 +16,7 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-OUTPUT_DIRS_GLOB = "data/test/capability_1_bi_apis/output"
+OUTPUT_DIRS_GLOB = "data/*/capability_1_bi_apis/output"
 MAPPING_FILE = "environment/configs/mcp_tool_universe_id_mapping.yaml"
 
 # Unique to SelectionTools (not present in SlotFillingTools)
@@ -46,12 +49,17 @@ def generate_mapping(dry_run: bool = False):
         )
         sys.exit(1)
 
+    out_path = REPO_ROOT / MAPPING_FILE
     mapping = {}
+    if out_path.exists():
+        with open(out_path, encoding="utf-8") as f:
+            mapping = yaml.safe_load(f) or {}
+    existing_count = len(mapping)
     duplicate_count = 0
 
     for output_dir in output_dirs:
         for json_file in sorted(output_dir.glob("*.json")):
-            with open(json_file) as f:
+            with open(json_file, encoding="utf-8") as f:
                 records = json.load(f)
 
             for record in records:
@@ -108,20 +116,15 @@ def generate_mapping(dry_run: bool = False):
                 }
 
     if duplicate_count:
-        print(
-            f"WARNING: Skipped {duplicate_count} duplicate UUID occurrences "
-            f"({len(mapping)} unique IDs kept)",
-            file=sys.stderr,
-        )
+        print(f"Skipped {duplicate_count} UUID occurrences that were already mapped")
 
-    out_path = REPO_ROOT / MAPPING_FILE
-    print(f"Generated {len(mapping)} entries")
+    print(f"Mapping has {len(mapping)} entries ({len(mapping) - existing_count} new)")
 
     if dry_run:
         print(f"DRY RUN: would write to {out_path}")
         return
 
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         yaml.dump(mapping, f, default_flow_style=False, allow_unicode=True)
 
     print(f"Written to {out_path}")
