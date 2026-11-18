@@ -134,6 +134,7 @@ from benchmark.runner_helpers import (
     BenchmarkItem,
     BenchmarkResult,
     CapabilityLogger,
+    TokenUsageCounter,
 )
 from benchmark.validate_clients import list_tools_for_domains
 from environment.m3.python_tools.mcp.mcp_server import DataPeek
@@ -155,6 +156,7 @@ async def run_benchmark_for_domain(
     cfg: MCPConnectionConfig,
     capability_id: int,
     llm,
+    usage_counter: TokenUsageCounter,
     max_samples: Optional[int] = None,
     top_k_tools: int = 0,
     max_iterations: Optional[int] = None,
@@ -227,6 +229,7 @@ async def run_benchmark_for_domain(
                 )
 
                 start_time = time.perf_counter()
+                usage_counter.reset()
 
                 try:
                     if get_data_tool:
@@ -322,6 +325,9 @@ async def run_benchmark_for_domain(
                     tlog(f"    Traceback: {traceback.format_exc()}")
 
                 result.duration_s = time.perf_counter() - start_time
+                result.llm_calls = usage_counter.llm_calls
+                result.input_tokens = usage_counter.input_tokens
+                result.output_tokens = usage_counter.output_tokens
                 results.append(result)
 
         tlog(f"\n  Server stopped for domain '{domain}'")
@@ -400,6 +406,8 @@ async def run_capability(
             domain_list = [d for d in domain_list if d not in completed]
 
     llm = create_llm(provider=provider, model=model, temperature=temperature)
+    usage_counter = TokenUsageCounter()
+    llm.callbacks = [*(llm.callbacks or []), usage_counter]
 
     # Process each domain, writing output incrementally
     all_results: List[BenchmarkResult] = []
@@ -413,6 +421,7 @@ async def run_capability(
             cfg=cfg,
             capability_id=capability_id,
             llm=llm,
+            usage_counter=usage_counter,
             max_samples=max_samples_per_domain,
             top_k_tools=top_k_tools,
             max_iterations=max_iterations,

@@ -6,7 +6,37 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.outputs import LLMResult
+
 from benchmark.utils import _extract_tool_response_values
+
+
+class TokenUsageCounter(BaseCallbackHandler):
+    """Sums the calls and token usage that a chat model reports.
+
+    Attached to the model itself, so it counts every call the agent makes,
+    including the calls that finished before a timeout or an error.
+    """
+
+    run_inline = True
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.llm_calls = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
+        self.llm_calls += 1
+        for generations in response.generations:
+            for generation in generations:
+                message = getattr(generation, "message", None)
+                usage = getattr(message, "usage_metadata", None) or {}
+                self.input_tokens += usage.get("input_tokens", 0)
+                self.output_tokens += usage.get("output_tokens", 0)
 
 
 # Task configurations - maps capability_id to input directory path
@@ -99,6 +129,9 @@ class BenchmarkResult:
     status: str = "pending"
     error: str = ""
     duration_s: float = 0.0
+    llm_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     all_tools: List[str] = field(default_factory=list)           # All tool names available for the domain before shortlisting
     shortlisted_tools: List[str] = field(default_factory=list)  # Tool names actually presented to the agent after shortlisting
 
@@ -297,6 +330,9 @@ def save_results_ground_truth(
                 "status": r.status,
                 "error": r.error,
                 "duration_s": r.duration_s,
+                "llm_calls": r.llm_calls,
+                "input_tokens": r.input_tokens,
+                "output_tokens": r.output_tokens,
                 "output": [
                     {
                         "turn_id": r.turn_id,
