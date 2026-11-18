@@ -7,8 +7,12 @@ from copy import deepcopy
 from prompt import GroundednessPrompt, CorrectnessPrompt
 from utils import JudgeInput, JudgeOutput
 from constant import N_TOOL_CALLS_PER_TURN
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from typing import Any, Dict, Optional, Tuple
+
+OLLAMA_JUDGE_NUM_CTX = 32768
 
 _LABEL_RE = re.compile(r"\b(yes|partial|no|unsure)\b", re.IGNORECASE)
 _CONCLUSION_RE = re.compile(r"<conclusion>\s*(.*?)\s*</conclusion>", re.IGNORECASE | re.DOTALL)
@@ -64,6 +68,22 @@ class ChatRits(ChatOpenAI):
         rits_config.update(params)
         super().__init__(**rits_config)
 
+def build_ollama_judge(config: dict) -> ChatOllama:
+    """Local judge served by Ollama, selected by JUDGE_MODEL and OLLAMA_BASE_URL."""
+    model_name = config.get("model_name") or os.getenv("JUDGE_MODEL")
+    if not model_name:
+        raise ValueError("JUDGE_MODEL is required for the ollama judge backend")
+    base_url = config.get("end_point") or os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434"
+    # A prompt longer than num_ctx is silently truncated by Ollama, so the window is sized
+    # for the groundedness prompt, which carries up to N_TOOL_CALLS_PER_TURN tool responses.
+    return ChatOllama(
+        model=model_name,
+        base_url=base_url,
+        temperature=0,
+        num_ctx=OLLAMA_JUDGE_NUM_CTX,
+        **config.get("params", {}),
+    )
+
 class LLMJudge:
     """
     Interface you implement with your provider (OpenAI, vLLM, etc).
@@ -74,7 +94,7 @@ class LLMJudge:
         self.model_config=config
         self.llm=self._build_llm(self.model_config)
 
-    def _build_llm(self, config: dict) -> ChatOpenAI:
+    def _build_llm(self, config: dict) -> BaseChatModel:
         backend = (
             config.get("backend")
             or config.get("provider")
@@ -88,7 +108,9 @@ class LLMJudge:
             return ChatRits(config)
         if backend == "groq":
             return ChatGroq(config)
-        raise ValueError(f"Unsupported judge backend: {backend!r}. Expected 'groq' or 'rits'.")
+        if backend == "ollama":
+            return build_ollama_judge(config)
+        raise ValueError(f"Unsupported judge backend: {backend!r}. Expected 'ollama', 'groq' or 'rits'.")
 
     def invoke(self, prompt:str) -> str:
         res = self.llm.invoke(prompt).content
