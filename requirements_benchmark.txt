@@ -15,8 +15,10 @@
 # ----------------------------------------------------------------------------
 # Core MCP Dependencies
 # ----------------------------------------------------------------------------
-# Model Context Protocol - for connecting to MCP servers via stdio
-mcp>=1.0.0
+# Model Context Protocol - for connecting to MCP servers via stdio.
+# Must stay below 2.0: mcp 2.x renames Tool.inputSchema, so agents/mcp_tool_wrapper.py
+# would hand every tool to the LLM without its parameter schema.
+mcp>=1.0.0,<2
 
 # ----------------------------------------------------------------------------
 # LangChain Core Framework
